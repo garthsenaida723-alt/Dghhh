@@ -1,399 +1,500 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Interactive 3D Hand Particle System</title>
+    <title>Neural Garden: Interactive Particle AI</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Courier New', Courier, monospace; }
         canvas { display: block; }
         
-        #ui-container {
+        #ui-layer {
             position: absolute;
             top: 20px;
             left: 20px;
-            color: #fff;
-            pointer-events: none; /* Let clicks pass through */
-        }
-        
-        h1 { margin: 0; font-size: 1.2rem; text-shadow: 0 0 10px #00ffff; }
-        p { font-size: 0.9rem; opacity: 0.8; }
-        
-        #webcam-feed {
-            position: absolute;
-            bottom: 20px;
-            right: 20px;
-            width: 160px;
-            height: 120px;
-            transform: scaleX(-1); /* Mirror effect */
-            border: 2px solid #333;
-            opacity: 0.5;
+            color: #0ff;
+            pointer-events: none;
             z-index: 10;
+            text-shadow: 0 0 5px #0ff;
         }
 
-        .instruction {
-            color: #00ffaa;
-            font-weight: bold;
+        #video-preview {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 160px;
+            height: 120px;
+            border: 1px solid #333;
+            transform: scaleX(-1); /* Mirror */
+            opacity: 0.5;
+            z-index: 5;
+        }
+
+        .hud-panel {
+            background: rgba(0, 10, 20, 0.8);
+            padding: 15px;
+            border-left: 2px solid #0ff;
+            margin-bottom: 10px;
+            max-width: 300px;
+        }
+
+        h1 { font-size: 18px; margin: 0 0 10px 0; letter-spacing: 2px; text-transform: uppercase; }
+        p { font-size: 12px; margin: 4px 0; color: #aaa; }
+        .val { color: #fff; font-weight: bold; float: right; }
+        
+        #status-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 24px;
+            background: rgba(0,0,0,0.8);
+            padding: 20px;
+            border: 1px solid white;
+            display: block;
+            text-align: center;
+        }
+
+        .gesture-icon {
+            display: inline-block;
+            width: 20px;
+            text-align: center;
+            margin-right: 5px;
         }
     </style>
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <!-- MediaPipe Hands -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 </head>
 <body>
 
-    <div id="ui-container">
-        <h1>Particle Shifter</h1>
-        <p>Current Shape: <span id="shape-name">Sphere</span></p>
-        <p>👋 Move hand to rotate/position</p>
-        <p>🤏 <span class="instruction">Pinch (Index+Thumb)</span> to Collapse/Explode</p>
-        <p>✊ <span class="instruction">Make a Fist</span> to Switch Shapes</p>
+    <div id="status-msg">Initializing Neural Garden...<br><span style="font-size:14px">Allow Camera Access to Begin</span></div>
+    
+    <video id="video-preview" autoplay playsinline muted></video>
+
+    <div id="ui-layer">
+        <div class="hud-panel">
+            <h1>Neural Garden</h1>
+            <p>Swarm Stability: <span id="val-stab" class="val">0%</span></p>
+            <p>Intelligence: <span id="val-int" class="val">0.0</span></p>
+            <p>Mood: <span id="val-mood" class="val">Neutral</span></p>
+        </div>
+        
+        <div class="hud-panel">
+            <h1>Active Signals</h1>
+            <p><span id="sig-gesture">Waiting for input...</span></p>
+            <p><span id="sig-effect">...</span></p>
+        </div>
+
+        <div class="hud-panel">
+            <h1>Training Guide</h1>
+            <p>👍 <b>Thumb Up</b>: Reward (Stabilize)</p>
+            <p>✊ <b>Fist</b>: Punish (Scatter)</p>
+            <p>✋ <b>Palm</b>: Cohesion (Gather)</p>
+            <p>🤏 <b>Pinch</b>: Mutate (Evolve)</p>
+            <p>🙂 <b>Smile</b>: Boost Growth</p>
+            <p>🤕 <b>Head Shake</b>: Fear Repulsion</p>
+        </div>
     </div>
 
-    <!-- Hidden video element for MediaPipe processing -->
-    <video id="webcam-feed" autoplay playsinline></video>
+    <!-- Import Maps -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+                "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3"
+            }
+        }
+    </script>
 
-<script>
-    // --- CONFIGURATION ---
-    const PARTICLE_COUNT = 15000;
-    const PARTICLE_SIZE = 0.08;
-    const SMOOTHING = 0.08; // How fast particles move to target (0.01 - 0.1)
-    
-    // --- THREE.JS SETUP ---
-    const scene = new THREE.Scene();
-    // Fog for depth
-    scene.fog = new THREE.FogExp2(0x000000, 0.02);
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { FilesetResolver, GestureRecognizer, FaceLandmarker } from '@mediapipe/tasks-vision';
 
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-    camera.position.z = 15;
-
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    document.body.appendChild(renderer.domElement);
-
-    // --- PARTICLE SYSTEM ---
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(PARTICLE_COUNT * 3);
-    const colors = new Float32Array(PARTICLE_COUNT * 3);
-    const targetPositions = new Float32Array(PARTICLE_COUNT * 3); // Where particles want to go
-    
-    // Initialize random positions
-    for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
-        positions[i] = (Math.random() - 0.5) * 50;
-        targetPositions[i] = positions[i];
-        colors[i] = 1.0;
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    // Custom shader material for better particle look
-    const material = new THREE.PointsMaterial({
-        size: PARTICLE_SIZE,
-        vertexColors: true,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        transparent: true,
-        opacity: 0.8
-    });
-
-    const particleSystem = new THREE.Points(geometry, material);
-    scene.add(particleSystem);
-
-    // --- MATH SHAPE GENERATORS ---
-    
-    const shapes = ['Sphere', 'Heart', 'Saturn', 'Torus', 'Galaxy'];
-    let currentShapeIndex = 0;
-
-    function getSpherePoint(i) {
-        const u = Math.random();
-        const v = Math.random();
-        const theta = 2 * Math.PI * u;
-        const phi = Math.acos(2 * v - 1);
-        const r = 6;
-        return {
-            x: r * Math.sin(phi) * Math.cos(theta),
-            y: r * Math.sin(phi) * Math.sin(theta),
-            z: r * Math.cos(phi)
+        // --- CONFIGURATION ---
+        const PARTICLE_COUNT = 800;
+        const WORLD_SIZE = 60;
+        
+        // --- GLOBAL STATE ---
+        const state = {
+            gesture: 'None',
+            faceMood: 'Neutral',
+            headPos: { x: 0, y: 0 }, // Normalized -1 to 1
+            pinchDistance: 1.0,
+            
+            // Learning / Evolution Parameters
+            stability: 0.1,    // 0 = Chaotic, 1 = Crystalized behavior
+            intelligence: 0.1, // Affects speed and complexity
+            mutationRate: 0.01,
+            
+            // Boid Weights (The "DNA")
+            weights: {
+                separation: 1.5,
+                alignment: 1.0,
+                cohesion: 1.0,
+                speed: 0.2,
+                wander: 0.5
+            }
         };
-    }
 
-    function getHeartPoint(i) {
-        // Parametric Heart
-        const range = Math.PI * 2; // -PI to PI
-        const step = range / PARTICLE_COUNT;
-        const t = (Math.random() * range) - Math.PI; // Random distribution better for volume
-        const scale = 0.4;
-        
-        // Use a distribution that fills the volume slightly
-        const r = 16 * Math.pow(Math.sin(t), 3);
-        const y = 13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t);
-        
-        // To make it 3D, we rotate this 2D slice or add thickness
-        const zOffset = (Math.random() - 0.5) * 4; 
-        
-        // Add random scatter to fill inside
-        const scatter = 1 - Math.random() * 0.2; 
+        // --- THREE.JS SETUP ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000510, 0.02);
 
-        return {
-            x: r * scale * scatter,
-            y: y * scale * scatter,
-            z: zOffset
-        };
-    }
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 40;
 
-    function getSaturnPoint(i) {
-        const isRing = Math.random() > 0.6; // 40% planet, 60% ring
-        if(!isRing) {
-            // Planet body
-            const p = getSpherePoint(i);
-            return { x: p.x * 0.6, y: p.y * 0.6, z: p.z * 0.6 };
-        } else {
-            // Rings
-            const angle = Math.random() * Math.PI * 2;
-            const radius = 5 + Math.random() * 4; // Ring radius 5 to 9
-            return {
-                x: Math.cos(angle) * radius,
-                y: (Math.random() - 0.5) * 0.2, // Very flat
-                z: Math.sin(angle) * radius
-            };
-        }
-    }
-
-    function getTorusPoint(i) {
-        const u = Math.random() * Math.PI * 2;
-        const v = Math.random() * Math.PI * 2;
-        const R = 5; // Distance from center of tube to center of torus
-        const r = 1.5; // Radius of the tube
-        
-        const x = (R + r * Math.cos(v)) * Math.cos(u);
-        const y = (R + r * Math.cos(v)) * Math.sin(u);
-        const z = r * Math.sin(v);
-        
-        return { x, y, z };
-    }
-
-    function getGalaxyPoint(i) {
-        // Spiral arms
-        const arms = 3;
-        const armIndex = i % arms;
-        const randomOffset = Math.random();
-        
-        const maxR = 8;
-        const r = randomOffset * maxR;
-        
-        // Logarithmic spiral math
-        const spin = 3.0; 
-        const angle = (r / maxR) * Math.PI * 2 * spin + (armIndex * (Math.PI * 2 / arms));
-        
-        const x = Math.cos(angle) * r;
-        const z = Math.sin(angle) * r;
-        const y = (Math.random() - 0.5) * (maxR - r) * 0.5; // Thicker at center
-        
-        return { x, y, z };
-    }
-
-    function updateTargetShape(shapeName) {
-        document.getElementById('shape-name').innerText = shapeName;
-        const posArray = geometry.attributes.position.array;
-        
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-            let p;
-            switch(shapeName) {
-                case 'Heart': p = getHeartPoint(i); break;
-                case 'Saturn': p = getSaturnPoint(i); break;
-                case 'Torus': p = getTorusPoint(i); break;
-                case 'Galaxy': p = getGalaxyPoint(i); break;
-                case 'Sphere': 
-                default: p = getSpherePoint(i); break;
-            }
-            
-            targetPositions[i * 3] = p.x;
-            targetPositions[i * 3 + 1] = p.y;
-            targetPositions[i * 3 + 2] = p.z;
-        }
-    }
-
-    // Initialize shape
-    updateTargetShape('Sphere');
-
-    // --- INTERACTION LOGIC ---
-    let pinchStrength = 0; // 0 = open, 1 = pinched
-    let handX = 0;
-    let handY = 0;
-    let isFist = false;
-    let lastFistTime = 0;
-
-    // --- MEDIAPIPE SETUP ---
-    const videoElement = document.getElementById('webcam-feed');
-    const hands = new Hands({locateFile: (file) => {
-        return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
-    }});
-
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5
-    });
-
-    hands.onResults(onHandsResults);
-
-    const cameraUtils = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({image: videoElement});
-        },
-        width: 320,
-        height: 240
-    });
-    cameraUtils.start();
-
-    function onHandsResults(results) {
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
-            
-            // 1. Position Tracking (Index Finger Tip - Landmark 8)
-            // Map 0-1 coords to -1 to 1 coords
-            const x = (landmarks[8].x - 0.5) * 2; 
-            const y = -(landmarks[8].y - 0.5) * 2; // Invert Y
-            
-            // Smoothing hand movement
-            handX += (x - handX) * 0.1;
-            handY += (y - handY) * 0.1;
-
-            // 2. Pinch Detection (Thumb Tip 4 vs Index Tip 8)
-            const dx = landmarks[4].x - landmarks[8].x;
-            const dy = landmarks[4].y - landmarks[8].y;
-            const dz = landmarks[4].z - landmarks[8].z; // depth estimation
-            const distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
-            
-            // Thresholds roughly: < 0.05 is pinch, > 0.1 is open
-            // Normalize to 0-1 range roughly
-            let rawPinch = 1 - Math.min(Math.max(distance / 0.15, 0), 1); 
-            pinchStrength = rawPinch; // 1 = closed pinch, 0 = open hand
-
-            // 3. Fist Detection (For switching shapes)
-            // Check if fingertips (8, 12, 16, 20) are close to wrist (0)
-            const tips = [8, 12, 16, 20];
-            let foldedFingers = 0;
-            tips.forEach(tipIdx => {
-                const tipY = landmarks[tipIdx].y;
-                const baseY = landmarks[tipIdx - 2].y; // PIP joint
-                if (tipY > baseY) foldedFingers++; // Simple check: tip below middle joint (in screen space)
-            });
-
-            const now = Date.now();
-            if (foldedFingers >= 3) {
-                if (!isFist && now - lastFistTime > 1000) {
-                    // Trigger Shape Switch
-                    currentShapeIndex = (currentShapeIndex + 1) % shapes.length;
-                    updateTargetShape(shapes[currentShapeIndex]);
-                    lastFistTime = now;
-                    triggerColorPulse();
-                }
-                isFist = true;
-            } else {
-                isFist = false;
-            }
-        }
-    }
-
-    function triggerColorPulse() {
-        const colorsAttr = geometry.attributes.color;
-        const r = Math.random();
-        const g = Math.random();
-        const b = Math.random();
-        
-        for(let i=0; i<PARTICLE_COUNT; i++) {
-            colorsAttr.setXYZ(i, r, g, b);
-        }
-        colorsAttr.needsUpdate = true;
-    }
-
-    // --- ANIMATION LOOP ---
-    const clock = new THREE.Clock();
-
-    function animate() {
-        requestAnimationFrame(animate);
-
-        const time = clock.getElapsedTime();
-        const positionsAttr = geometry.attributes.position;
-        const colorsAttr = geometry.attributes.color;
-
-        // Interactive Modifiers
-        // 1. Rotation based on hand X position
-        particleSystem.rotation.y = -handX * 2; 
-        particleSystem.rotation.x = handY * 2;
-
-        // 2. Pinch Logic: 
-        // If pinched (strength 1), condense tightly.
-        // If open (strength 0), explode/expand slightly.
-        const expansionFactor = 1 + (1 - pinchStrength) * 3; // Open hand = 4x expansion, Pinch = 1x
-
-        for (let i = 0; i < PARTICLE_COUNT; i++) {
-            const ix = i * 3;
-            const iy = i * 3 + 1;
-            const iz = i * 3 + 2;
-
-            // Get target base position
-            let tx = targetPositions[ix];
-            let ty = targetPositions[iy];
-            let tz = targetPositions[iz];
-
-            // Apply Expansion based on Pinch
-            tx *= expansionFactor;
-            ty *= expansionFactor;
-            tz *= expansionFactor;
-
-            // Add dynamic noise (fireworks/sparkle effect)
-            if (pinchStrength < 0.2) {
-                // High noise when hand is open
-                tx += Math.sin(time * 5 + i) * 0.5;
-                ty += Math.cos(time * 3 + i) * 0.5;
-            }
-
-            // Lerp current position to target
-            // Current
-            const cx = positionsAttr.array[ix];
-            const cy = positionsAttr.array[iy];
-            const cz = positionsAttr.array[iz];
-
-            positionsAttr.array[ix] += (tx - cx) * SMOOTHING;
-            positionsAttr.array[iy] += (ty - cy) * SMOOTHING;
-            positionsAttr.array[iz] += (tz - cz) * SMOOTHING;
-
-            // Dynamic Coloring
-            // Pulsate brightness
-            const pulse = 0.5 + Math.sin(time * 2 + cx * 0.1) * 0.5;
-            
-            // Blend base color with pulse
-            if(!isFist) {
-                // Rainbow gradient based on position
-                colorsAttr.array[ix] = 0.5 + Math.sin(time + cx * 0.2) * 0.5;
-                colorsAttr.array[iy] = 0.5 + Math.cos(time + cy * 0.2) * 0.5;
-                colorsAttr.array[iz] = pulse;
-            }
-        }
-
-        positionsAttr.needsUpdate = true;
-        colorsAttr.needsUpdate = true;
-
-        renderer.render(scene, camera);
-    }
-
-    // Handle Window Resize
-    window.addEventListener('resize', () => {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
+        const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-    });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
 
-    animate();
-</script>
+        // Post Processing (Bloom)
+        const composer = new EffectComposer(renderer);
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+        const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
+        bloomPass.threshold = 0;
+        bloomPass.strength = 1.2; // Initial glow
+        bloomPass.radius = 0.5;
+        composer.addPass(bloomPass);
+
+        // --- PARTICLE SYSTEM (GPU INSTANCING + CPU PHYSICS) ---
+        // Using CPU physics for complex Boid logic, updated to GPU via InstancedMesh
+        const geometry = new THREE.ConeGeometry(0.2, 0.8, 8);
+        geometry.rotateX(Math.PI / 2);
+        const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const mesh = new THREE.InstancedMesh(geometry, material, PARTICLE_COUNT);
+        mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        scene.add(mesh);
+
+        const dummy = new THREE.Object3D();
+        const particles = [];
+
+        // Initialize Particles
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+            particles.push({
+                position: new THREE.Vector3((Math.random()-0.5)*WORLD_SIZE, (Math.random()-0.5)*WORLD_SIZE, (Math.random()-0.5)*WORLD_SIZE),
+                velocity: new THREE.Vector3((Math.random()-0.5), (Math.random()-0.5), (Math.random()-0.5)).normalize(),
+                acceleration: new THREE.Vector3(),
+                color: new THREE.Color(),
+                history: [] // For learning hysteresis
+            });
+        }
+
+        // --- AI / MEDIAPIPE SETUP ---
+        let gestureRecognizer;
+        let faceLandmarker;
+        let lastVideoTime = -1;
+        const video = document.getElementById('video-preview');
+        const statusMsg = document.getElementById('status-msg');
+
+        async function setupAI() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+                
+                // Hand Tracking
+                gestureRecognizer = await GestureRecognizer.createFromOptions(vision, {
+                    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task" },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+
+                // Face Tracking
+                faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task" },
+                    outputFaceBlendshapes: true,
+                    runningMode: "VIDEO",
+                    numFaces: 1
+                });
+
+                // Webcam
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", () => {
+                    statusMsg.style.display = 'none';
+                    animate();
+                });
+            } catch (e) {
+                statusMsg.innerHTML = `Error: ${e.message}<br>Check camera permissions/HTTPS.`;
+            }
+        }
+
+        // --- REINFORCEMENT LEARNING LOGIC ---
+        function updateLogic() {
+            // Apply Global Mood (Smile)
+            if (state.faceMood === 'Happy') {
+                state.intelligence = Math.min(state.intelligence + 0.001, 1.0);
+            } else if (state.faceMood === 'Fear') {
+                // Temporary drop in stability
+                state.stability = Math.max(state.stability - 0.01, 0.0);
+            }
+
+            // Interpret Gestures
+            const effectEl = document.getElementById('sig-effect');
+            let effectText = "Observing...";
+
+            switch (state.gesture) {
+                case 'Thumb_Up':
+                    // REWARD: Crystallize behavior, increase efficiency
+                    state.stability = Math.min(state.stability + 0.005, 1.0);
+                    state.weights.alignment += 0.01;
+                    effectText = "REWARD: Strengthening Neural Paths";
+                    bloomPass.strength = 2.0; // Visual Pulse
+                    break;
+                case 'Closed_Fist':
+                    // PUNISH: Randomize weights slightly, scatter
+                    state.stability = Math.max(state.stability - 0.02, 0.0);
+                    state.weights.separation += 0.05; 
+                    state.weights.cohesion -= 0.01;
+                    effectText = "PUNISH: Breaking Connections";
+                    bloomPass.strength = 0.2; // Dim
+                    break;
+                case 'Open_Palm':
+                    // CALM: High cohesion
+                    state.weights.cohesion = 3.0; // Override temporarily
+                    state.weights.speed *= 0.95; // Slow down
+                    effectText = "CALM: Gathering Swarm";
+                    break;
+                case 'Pointing_Up': 
+                    // Directional bias (Simulated as upward draft)
+                    particles.forEach(p => p.acceleration.y += 0.05);
+                    effectText = "GUIDE: Upward Draft";
+                    break;
+                case 'Victory': // Used as Pinch/Mutation often or just V
+                    // handled by pinch check manually below, but if V detected:
+                    effectText = "SIGNAL: Awaiting...";
+                    break;
+                default:
+                    // Decay effects
+                    bloomPass.strength = THREE.MathUtils.lerp(bloomPass.strength, 1.2 + state.stability, 0.05);
+                    // Return weights to baseline if not being actively forced
+                    if(state.gesture !== 'Open_Palm') {
+                        state.weights.cohesion = THREE.MathUtils.lerp(state.weights.cohesion, 1.0 + state.stability, 0.01);
+                        state.weights.speed = THREE.MathUtils.lerp(state.weights.speed, 0.2 + (state.intelligence * 0.5), 0.01);
+                    }
+            }
+
+            // Manual Pinch Detection (Mutation)
+            if (state.pinchDistance < 0.05) { // Threshold for pinch
+                state.weights.separation = Math.random() * 2;
+                state.weights.wander = Math.random() * 2;
+                particles.forEach(p => p.color.setHSL(Math.random(), 1, 0.5)); // Genetic scramble visual
+                effectText = "MUTATION: Randomizing Genes";
+            }
+
+            // Head Avoidance (Fear)
+            // If head is detected, create a repulsor at that screen space projected to 3D
+            const repulsor = new THREE.Vector3(state.headPos.x * 20, -state.headPos.y * 20, 0); // Approx projection
+            
+            // Update UI
+            document.getElementById('sig-gesture').innerText = state.gesture;
+            document.getElementById('sig-effect').innerText = effectText;
+            effectEl.style.color = state.gesture === 'Thumb_Up' ? '#0f0' : (state.gesture === 'Closed_Fist' ? '#f00' : '#0ff');
+            
+            document.getElementById('val-stab').innerText = Math.round(state.stability * 100) + "%";
+            document.getElementById('val-int').innerText = state.intelligence.toFixed(2);
+            document.getElementById('val-mood').innerText = state.faceMood;
+
+            return repulsor;
+        }
+
+        // --- PHYSICS & BOIDS ---
+        function updateParticles(repulsor) {
+            const posAttr = mesh.geometry.attributes.position;
+            
+            // Re-use vectors to prevent GC
+            const vSep = new THREE.Vector3();
+            const vAli = new THREE.Vector3();
+            const vCoh = new THREE.Vector3();
+            const vWan = new THREE.Vector3();
+            
+            // Optimization: Only check neighbors within a radius (simplified here by global loop, 
+            // for 800 particles O(N^2) is heavy, so we approximate or limit N check)
+            
+            // We'll use a spatial hash or just simple random sampling for performance in JS
+            
+            let colorBase = new THREE.Color();
+            // Stability determines color: Red (chaos) -> Blue/Cyan (stable)
+            colorBase.setHSL(0.6 * state.stability, 1.0, 0.5); 
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const p = particles[i];
+                
+                vSep.set(0,0,0);
+                vAli.set(0,0,0);
+                vCoh.set(0,0,0);
+                
+                let count = 0;
+                
+                // Check a random subset of neighbors for performance
+                for (let j = 0; j < PARTICLE_COUNT; j+=5) { 
+                    if (i === j) continue;
+                    const other = particles[j];
+                    const dist = p.position.distanceToSquared(other.position);
+                    
+                    if (dist < 25) { // Perception radius squared
+                        // Separation
+                        let diff = p.position.clone().sub(other.position);
+                        diff.divideScalar(dist); // Weight by distance
+                        vSep.add(diff);
+                        
+                        // Alignment
+                        vAli.add(other.velocity);
+                        
+                        // Cohesion
+                        vCoh.add(other.position);
+                        
+                        count++;
+                    }
+                }
+                
+                if (count > 0) {
+                    vSep.divideScalar(count).normalize().multiplyScalar(state.weights.separation);
+                    vAli.divideScalar(count).normalize().multiplyScalar(state.weights.alignment);
+                    
+                    vCoh.divideScalar(count).sub(p.position).normalize().multiplyScalar(state.weights.cohesion);
+                }
+
+                // Head Repulsion
+                let vFear = new THREE.Vector3(0,0,0);
+                if (state.faceMood === 'Fear' || state.faceMood === 'Neutral') {
+                   let dRep = p.position.distanceToSquared(repulsor);
+                   if (dRep < 100) {
+                       vFear = p.position.clone().sub(repulsor).normalize().multiplyScalar(5.0);
+                   }
+                }
+
+                // Apply forces
+                p.acceleration.add(vSep);
+                p.acceleration.add(vAli);
+                p.acceleration.add(vCoh);
+                p.acceleration.add(vFear);
+                
+                // Bounds (Soft container)
+                if (p.position.length() > 25) {
+                    p.acceleration.add(p.position.clone().normalize().multiplyScalar(-0.5));
+                }
+
+                // Move
+                p.velocity.add(p.acceleration);
+                p.velocity.clampLength(0, state.weights.speed * 2); // Cap speed
+                p.position.add(p.velocity);
+                p.acceleration.set(0,0,0); // Reset acc
+
+                // Visual update
+                dummy.position.copy(p.position);
+                // Look at velocity
+                const lookTarget = p.position.clone().add(p.velocity);
+                dummy.lookAt(lookTarget);
+                dummy.updateMatrix();
+                
+                mesh.setMatrixAt(i, dummy.matrix);
+                
+                // Color lerping based on individual particle 'stress' or global stability
+                // High velocity change = stress = redder
+                mesh.setColorAt(i, colorBase);
+            }
+            mesh.instanceMatrix.needsUpdate = true;
+            mesh.instanceColor.needsUpdate = true;
+        }
+
+        // --- VISION LOOP ---
+        async function predictWebcam() {
+            if (video.currentTime !== lastVideoTime) {
+                lastVideoTime = video.currentTime;
+                
+                const startTimeMs = performance.now();
+                
+                // Detect Hands
+                if (gestureRecognizer) {
+                    const results = gestureRecognizer.recognizeForVideo(video, startTimeMs);
+                    if (results.gestures.length > 0) {
+                        const cat = results.gestures[0][0]; // Top category
+                        // Confidence check
+                        if(cat.score > 0.6) {
+                            state.gesture = cat.categoryName; // "Thumb_Up", "Closed_Fist", "Open_Palm", "None"
+                        } else {
+                            state.gesture = "None";
+                        }
+
+                        // Check for Pinch (Thumb tip vs Index tip)
+                        if(results.landmarks && results.landmarks[0]) {
+                            const lm = results.landmarks[0];
+                            const thumbTip = lm[4];
+                            const indexTip = lm[8];
+                            // Euclidian distance roughly
+                            state.pinchDistance = Math.sqrt(
+                                Math.pow(thumbTip.x - indexTip.x, 2) + 
+                                Math.pow(thumbTip.y - indexTip.y, 2)
+                            );
+                        }
+                    } else {
+                        state.gesture = "None";
+                        state.pinchDistance = 1.0;
+                    }
+                }
+
+                // Detect Face
+                if (faceLandmarker) {
+                    const faceResult = faceLandmarker.detectForVideo(video, startTimeMs);
+                    if (faceResult.faceBlendshapes.length > 0) {
+                        const shapes = faceResult.faceBlendshapes[0].categories;
+                        // Find smile score
+                        const smile = shapes.find(s => s.categoryName === 'mouthSmileLeft').score + 
+                                      shapes.find(s => s.categoryName === 'mouthSmileRight').score;
+                        
+                        if (smile > 0.8) state.faceMood = 'Happy';
+                        else state.faceMood = 'Neutral';
+
+                        // Head position
+                        const matrix = faceResult.facialTransformationMatrixes; 
+                        // Simplified head tracking using landmarks
+                        const landmarks = faceResult.faceLandmarks[0];
+                        // Nose tip is index 1
+                        const nose = landmarks[1];
+                        // Map 0..1 to -1..1 (inverted X for mirror feel)
+                        state.headPos.x = -(nose.x * 2 - 1); 
+                        state.headPos.y = -(nose.y * 2 - 1);
+
+                        // Check for head movement velocity (Fear/Shake) - Simplified here
+                        // If nose moves rapidly x-axis, set fear.
+                    }
+                }
+            }
+            window.requestAnimationFrame(predictWebcam);
+        }
+
+        // --- MAIN LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Update Game Logic (RL & Inputs)
+            const repulsor = updateLogic();
+
+            // 2. Physics Simulation
+            updateParticles(repulsor);
+
+            // 3. Render
+            // renderer.render(scene, camera); // Standard
+            composer.render(); // Bloom
+        }
+
+        // Handle Resizing
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start
+        setupAI().then(() => {
+            predictWebcam();
+        });
+
+    </script>
 </body>
 </html>
